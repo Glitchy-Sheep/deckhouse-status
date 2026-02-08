@@ -16,18 +16,10 @@ curl -fsSL https://raw.githubusercontent.com/glitchy-sheep/deckhouse-status/main
 
 Скрипт определяет OS/arch, скачивает бинарник из GitHub Releases и кладёт в `/usr/local/bin`.
 
-### Сборка из исходников
-
-```bash
-make build-linux-amd64
-scp deckhouse-status-linux-amd64 root@master-node:/usr/local/bin/deckhouse-status
-```
-
-Другие цели: `make build` (локальная), `make build-all` (все платформы).
-
 ## Использование
 
 ```bash
+deckhouse-status install-motd          # Автозапуск при логине ssh
 deckhouse-status                       # полный вывод (таймзона: Europe/Moscow)
 deckhouse-status -s                    # компактный вывод (2-3 строки)
 deckhouse-status --tz America/New_York # IANA-имя
