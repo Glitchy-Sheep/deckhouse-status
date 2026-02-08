@@ -62,9 +62,7 @@ func fetchToken(ctx context.Context, host, repo string, creds *kube.RegistryCred
 	if err != nil {
 		return "", fmt.Errorf("token request failed: %w", err)
 	}
-	if err := resp.Body.Close(); err != nil {
-		return "", fmt.Errorf("close registry response: %w", err)
-	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("token request: HTTP %d", resp.StatusCode)
