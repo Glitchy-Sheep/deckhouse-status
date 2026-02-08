@@ -75,7 +75,12 @@ func (p *Printer) printGitHub(pr *github.PRInfo, prErr error) {
 func (p *Printer) printStatus(cluster *kube.ClusterInfo, pr *github.PRInfo, reg *registry.Result, edition string) {
 	p.section(p.emoji("📊", "[ST]") + " STATUS")
 
+	buildActive := pr != nil && (pr.BuildStatus == "in_progress" || pr.BuildStatus == "queued")
+
 	switch {
+	case buildActive:
+		p.printBuildBasedStatus(cluster, pr, edition)
+
 	case reg != nil && reg.TagExists && reg.Digest != "":
 		if reg.DigestMatch {
 			p.statusRow(p.emoji("✅", "[OK]"), p.green, "Up to date", "digest matches registry")
@@ -149,7 +154,12 @@ func (p *Printer) printRegistryLine(reg *registry.Result) {
 
 // statusLine returns a one-line status string (for short mode).
 func (p *Printer) statusLine(cluster *kube.ClusterInfo, pr *github.PRInfo, reg *registry.Result, edition string) string {
+	buildActive := pr != nil && (pr.BuildStatus == "in_progress" || pr.BuildStatus == "queued")
+
 	switch {
+	case buildActive:
+		return fmt.Sprintf("%s%s Building...%s", p.cyan, p.emoji("🔄", "[~]"), p.reset)
+
 	case reg != nil && reg.TagExists && reg.Digest != "":
 		if reg.DigestMatch {
 			return fmt.Sprintf("%s%s Up to date%s", p.green, p.emoji("✅", "[OK]"), p.reset)

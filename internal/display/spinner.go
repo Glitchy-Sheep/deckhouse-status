@@ -3,23 +3,32 @@ package display
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 )
 
 // Spinner renders a live progress line with elapsed time to stderr.
+// It runs an async render loop so the animation stays smooth between API polls.
 type Spinner struct {
 	frames  []string
 	started time.Time
+
+	mu      sync.Mutex
 	frame   int
+	message string
+	done    bool
+	stopCh  chan struct{}
 
 	// ANSI codes
 	reset, bold, dim, cyan, green, red string
 }
 
 // NewSpinner creates a spinner respecting color/emoji preferences.
+// It starts the background render loop immediately.
 func NewSpinner(noColor, noEmoji bool) *Spinner {
 	s := &Spinner{
 		started: time.Now(),
+		stopCh:  make(chan struct{}),
 	}
 
 	if noEmoji {
@@ -37,23 +46,61 @@ func NewSpinner(noColor, noEmoji bool) *Spinner {
 		s.red = "\033[31m"
 	}
 
+	go s.loop()
 	return s
 }
 
-// Tick renders one spinner frame with a message and elapsed time.
-func (s *Spinner) Tick(message string) {
+func (s *Spinner) loop() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.render()
+		}
+	}
+}
+
+func (s *Spinner) render() {
+	s.mu.Lock()
+	if s.done || s.message == "" {
+		s.mu.Unlock()
+		return
+	}
 	elapsed := time.Since(s.started).Truncate(time.Second)
 	frame := s.frames[s.frame%len(s.frames)]
+	msg := s.message
 	s.frame++
+	s.mu.Unlock()
+
 	fmt.Fprintf(os.Stderr, "\r\033[K%s%s%s %s %s[%s]%s",
 		s.cyan, frame, s.reset,
-		message,
+		msg,
 		s.dim, elapsed, s.reset,
 	)
 }
 
+// Tick updates the spinner message. The animation continues asynchronously.
+func (s *Spinner) Tick(message string) {
+	s.mu.Lock()
+	s.message = message
+	s.mu.Unlock()
+}
+
 // ClearLine clears the current spinner line.
 func (s *Spinner) ClearLine() {
+	s.mu.Lock()
+	s.done = true
+	s.mu.Unlock()
+
+	select {
+	case s.stopCh <- struct{}{}:
+	default:
+	}
+
 	fmt.Fprint(os.Stderr, "\r\033[K")
 }
 
