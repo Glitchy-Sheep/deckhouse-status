@@ -59,7 +59,7 @@ func Check(ctx context.Context, host, repo, tag, runningDigest string, creds *ku
 	return r
 }
 
-func fetchManifestDigest(ctx context.Context, host, repo, reference, token string) (string, error) {
+func fetchManifestDigest(ctx context.Context, host, repo, reference, token string) (digest string, err error) {
 	manifestURL := fmt.Sprintf("https://%s/v2/%s/manifests/%s", host, repo, reference)
 
 	req, err := http.NewRequestWithContext(ctx, "HEAD", manifestURL, nil)
@@ -75,9 +75,11 @@ func fetchManifestDigest(ctx context.Context, host, repo, reference, token strin
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-	if err := resp.Body.Close(); err != nil {
-		return "", fmt.Errorf("close registry response: %w", err)
-	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close registry response: %w", closeErr)
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", ErrTagNotFound
@@ -86,7 +88,7 @@ func fetchManifestDigest(ctx context.Context, host, repo, reference, token strin
 		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	digest := resp.Header.Get("Docker-Content-Digest")
+	digest = resp.Header.Get("Docker-Content-Digest")
 	if digest == "" {
 		return "", fmt.Errorf("no Docker-Content-Digest header")
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/glitchy-sheep/deckhouse-status/internal/kube"
 )
 
-func fetchToken(ctx context.Context, host, repo string, creds *kube.RegistryCreds) (string, error) {
+func fetchToken(ctx context.Context, host, repo string, creds *kube.RegistryCreds) (token string, err error) {
 	// Hit /v2/ to get WWW-Authenticate parameters (realm, service)
 	checkURL := fmt.Sprintf("https://%s/v2/", host)
 	req, err := http.NewRequestWithContext(ctx, "GET", checkURL, nil)
@@ -23,14 +23,17 @@ func fetchToken(ctx context.Context, host, repo string, creds *kube.RegistryCred
 	if err != nil {
 		return "", fmt.Errorf("cannot reach registry: %w", err)
 	}
-	wwwAuth := resp.Header.Get("Www-Authenticate")
-	if err := resp.Body.Close(); err != nil {
-		return "", fmt.Errorf("close registry response: %w", err)
-	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close registry response: %w", closeErr)
+		}
+	}()
 
 	if resp.StatusCode == http.StatusOK {
 		return "", nil // no auth needed
 	}
+
+	wwwAuth := resp.Header.Get("Www-Authenticate")
 	if wwwAuth == "" {
 		return "", fmt.Errorf("no WWW-Authenticate header from registry")
 	}
@@ -50,32 +53,36 @@ func fetchToken(ctx context.Context, host, repo string, creds *kube.RegistryCred
 
 	tokenURL := realm + "?" + q.Encode()
 
-	req, err = http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+	tokenReq, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
 	if err != nil {
 		return "", err
 	}
 	if creds != nil && creds.Auth != "" {
-		req.Header.Set("Authorization", "Basic "+creds.Auth)
+		tokenReq.Header.Set("Authorization", "Basic "+creds.Auth)
 	}
 
-	resp, err = http.DefaultClient.Do(req)
+	tokenResp, err := http.DefaultClient.Do(tokenReq)
 	if err != nil {
 		return "", fmt.Errorf("token request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := tokenResp.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close token response: %w", closeErr)
+		}
+	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token request: HTTP %d", resp.StatusCode)
+	if tokenResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token request: HTTP %d", tokenResp.StatusCode)
 	}
 
-	var tokenResp struct {
+	var parsed struct {
 		Token string `json:"token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	if err := json.NewDecoder(tokenResp.Body).Decode(&parsed); err != nil {
 		return "", fmt.Errorf("cannot decode token response: %w", err)
 	}
 
-	return tokenResp.Token, nil
+	return parsed.Token, nil
 }
 
 var wwwAuthParamRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
