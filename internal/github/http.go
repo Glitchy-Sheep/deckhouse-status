@@ -5,8 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 )
+
+// githubToken is read once at init time from the environment.
+var githubToken = os.Getenv("GITHUB_TOKEN")
 
 func getJSON(ctx context.Context, url string, target any) error {
 	_, err := getJSONConditional(ctx, url, "", target)
@@ -21,6 +27,9 @@ func getJSONConditional(ctx context.Context, reqURL string, etag string, target 
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if githubToken != "" {
+		req.Header.Set("Authorization", "Bearer "+githubToken)
+	}
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
@@ -42,6 +51,14 @@ func getJSONConditional(ctx context.Context, reqURL string, etag string, target 
 		result.NotModified = true
 		return result, nil
 	case resp.StatusCode == http.StatusForbidden:
+		if resetStr := resp.Header.Get("X-RateLimit-Reset"); resetStr != "" {
+			if resetUnix, err := strconv.ParseInt(resetStr, 10, 64); err == nil {
+				wait := time.Until(time.Unix(resetUnix, 0)).Truncate(time.Second)
+				if wait > 0 {
+					return conditionalResult{}, fmt.Errorf("rate limited (resets in %s)", wait)
+				}
+			}
+		}
 		return conditionalResult{}, fmt.Errorf("rate limited (HTTP 403)")
 	case resp.StatusCode != http.StatusOK:
 		return conditionalResult{}, fmt.Errorf("HTTP %d", resp.StatusCode)
